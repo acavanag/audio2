@@ -6,36 +6,41 @@
 //
 //
 
-#import "AudioEngine.h"
-
-AudioStreamBasicDescription ae_kAudioFormat = {
-    .mSampleRate       = 44100.00,
-    .mFormatID         = kAudioFormatLinearPCM,
-    .mFormatFlags      = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-    .mFramesPerPacket  = 1,
-    .mChannelsPerFrame = 1,
-    .mBitsPerChannel   = 16,
-    .mBytesPerPacket   = 2,
-    .mBytesPerFrame    = 2
-};
+#import "AudioRecorder.h"
 
 static const int ae_kOutputBus = 0;
 static const int ae_kInputBus = 1;
 
-@interface AudioEngine()
+@interface AudioRecorder()
 {
     OSStatus status;
     AudioUnit audioUnit;
     AudioBufferList *list;
+
+    int numberOfFrames;
+    AudioStreamBasicDescription ae_kAudioFormat;
 }
 @property (nonatomic, copy) AudioInputBlock block;
 @end
 
-@implementation AudioEngine
+@implementation AudioRecorder
 
 - (instancetype)init {
     if (self = [super init]) {
+        AudioStreamBasicDescription audioFormat = {
+            .mSampleRate       = 44100.00,
+            .mFormatID         = kAudioFormatLinearPCM,
+            .mFormatFlags      = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            .mFramesPerPacket  = 1,
+            .mChannelsPerFrame = 1,
+            .mBitsPerChannel   = 16,
+            .mBytesPerPacket   = 2,
+            .mBytesPerFrame    = 2
+        };
+        ae_kAudioFormat = audioFormat;
         self->_audioFormat = [[AVAudioFormat alloc] initWithStreamDescription:&ae_kAudioFormat];
+        self->numberOfFrames = 512;
+        _bufferSize = self->numberOfFrames * self->ae_kAudioFormat.mBytesPerFrame;
         [self setup];
     }
     return self;
@@ -115,10 +120,10 @@ static inline BOOL _checkStatus(OSStatus result, const char *operation, const ch
 
 static OSStatus recordingCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData)
 {
-    AudioEngine *e = (__bridge AudioEngine *)inRefCon;
+    AudioRecorder *e = (__bridge AudioRecorder *)inRefCon;
     
     if (e->list == NULL) {
-        UInt32 size = inNumberFrames * ae_kAudioFormat.mBytesPerFrame; //(512 * 2)
+        UInt32 size = inNumberFrames * e->ae_kAudioFormat.mBytesPerFrame;
         e->list = Buffer_create(size);
     }
     
@@ -129,7 +134,7 @@ static OSStatus recordingCallback(void *inRefCon, AudioUnitRenderActionFlags *io
     
     
     SInt16 *inputFrames = (SInt16 *)(e->list->mBuffers->mData);
-    [e renderBuffer:inputFrames frameCount:inNumberFrames bytesPerFrame:ae_kAudioFormat.mBytesPerFrame];
+    [e renderBuffer:inputFrames frameCount:inNumberFrames bytesPerFrame:e->ae_kAudioFormat.mBytesPerFrame];
 
     return noErr;
 }
@@ -146,7 +151,7 @@ static OSStatus playbackCallback(void *inRefCon, AudioUnitRenderActionFlags *ioA
 - (void)renderBuffer:(SInt16 *)buffer frameCount:(UInt32)frameCount bytesPerFrame:(UInt32)bytesPerFrame
 {
     if (self.block) {
-        self.block([NSData dataWithBytes:buffer length:frameCount * bytesPerFrame], self->_audioFormat, frameCount);
+        self.block([NSData dataWithBytes:buffer length:frameCount * bytesPerFrame]);
     }
 }
 
@@ -180,6 +185,9 @@ void Buffer_destory(AudioBufferList* bufferList)
 - (void)dealloc
 {
     Buffer_destory(list);
+    if (audioUnit) {
+        AudioComponentInstanceDispose(audioUnit);
+    }
 }
 
 @end

@@ -16,7 +16,7 @@ typedef void(^BufferBlock)(AudioQueueBufferRef buffer, AudioStreamBasicDescripti
 @property (nonatomic, copy) BufferBlock bufferBlock;
 
 - (instancetype)initWithAudioDescription:(AVAudioFormat *)description packetSize:(UInt32)size;
-- (void)scheduleBuffer:(SInt16 *)buffer length:(UInt32)length;
-- (void)start;
-- (void)stop;
+- (void)scheduleBuffer:(NSData *)buffer;
+- (void)startPlaying;
+- (void)stopPlaying;
 @end

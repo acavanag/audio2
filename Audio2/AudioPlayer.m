@@ -42,7 +42,7 @@
     }
 }
 
-- (void)start
+- (void)startPlaying
 {
     if (_isPlaying == NO) {
         AudioQueueStart(_playQueue, NULL);
@@ -50,7 +50,7 @@
     }
 }
 
-- (void)stop
+- (void)stopPlaying
 {
     if (_isPlaying == YES) {
         AudioQueueStop(_playQueue, TRUE);
@@ -66,11 +66,11 @@ static void PlayCallback(void *inUserData, AudioQueueRef inAudioQueue, AudioQueu
     [player.bufferQueue reclaimBufferForBufferRef:inBuffer];
 }
 
-- (void)scheduleBuffer:(SInt16 *)buffer length:(UInt32)length
+- (void)scheduleBuffer:(NSData *)buffer
 {
     if (_isPlaying) {
         ACAudioQueueBuffer *bufferObj = [_bufferQueue nextBuffer];
-        [bufferObj fillBuffer:buffer length:length];
+        [bufferObj fillBuffer:(SInt16 *)buffer.bytes length:(UInt32)buffer.length];
         AudioQueueEnqueueBuffer(_playQueue, [bufferObj buffer], 0, NULL);
     }
 }
