@@ -6,36 +6,52 @@
 //
 //
 
-#define kOutputBus 0
-#define kInputBus 1
-
 #import "AudioEngine.h"
 
-OSStatus status;
-AudioUnit audioUnit;
-AudioBufferList *list;
-AudioStreamBasicDescription stream;
+AudioStreamBasicDescription ae_kAudioFormat = {
+    .mSampleRate       = 44100.00,
+    .mFormatID         = kAudioFormatLinearPCM,
+    .mFormatFlags      = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+    .mFramesPerPacket  = 1,
+    .mChannelsPerFrame = 1,
+    .mBitsPerChannel   = 16,
+    .mBytesPerPacket   = 2,
+    .mBytesPerFrame    = 2
+};
+
+static const int ae_kOutputBus = 0;
+static const int ae_kInputBus = 1;
 
 @interface AudioEngine()
+{
+    OSStatus status;
+    AudioUnit audioUnit;
+    AudioBufferList *list;
+}
 @property (nonatomic, copy) AudioInputBlock block;
-@property (nonatomic, strong) AVAudioFormat *format;
 @end
 
 @implementation AudioEngine
 
-void checkStatus(OSStatus status)
-{
-    if (status != noErr) {
-        NSLog(@"FUCK FUCK FUCK");
-    }
-}
-
 - (instancetype)init {
     if (self = [super init]) {
+        self->_audioFormat = [[AVAudioFormat alloc] initWithStreamDescription:&ae_kAudioFormat];
         [self setup];
     }
     return self;
 }
+
+#define checkStatus(result,operation) (_checkStatus((result),(operation),strrchr(__FILE__, '/')+1,__LINE__))
+static inline BOOL _checkStatus(OSStatus result, const char *operation, const char* file, int line)
+{
+    if ( result != noErr ) {
+        NSLog(@"%d %s %s %d", (int)result, operation, file, line);
+        return NO;
+    }
+    return YES;
+}
+
+#pragma mark - Configure AU
 
 - (void)setup
 {
@@ -48,163 +64,98 @@ void checkStatus(OSStatus status)
     desc.componentFlagsMask = 0;
     desc.componentManufacturer = kAudioUnitManufacturer_Apple;
     
-    // Get component
     AudioComponent inputComponent = AudioComponentFindNext(NULL, &desc);
     
-    // Get audio units
     status = AudioComponentInstanceNew(inputComponent, &audioUnit);
-    checkStatus(status);
+    checkStatus(status, "AudioComponentInstanceNew");
     
-    // Enable IO for recording
-    UInt32 flag = 1;
-    status = AudioUnitSetProperty(audioUnit,
-                                  kAudioOutputUnitProperty_EnableIO,
-                                  kAudioUnitScope_Input,
-                                  kInputBus,
-                                  &flag,
-                                  sizeof(flag));
-    checkStatus(status);
+    UInt32 inputEnabled = 1;
+    status = AudioUnitSetProperty(audioUnit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, ae_kInputBus, &inputEnabled, sizeof(inputEnabled));
+    checkStatus(status, "AudioUnitSetProperty EnableIO Input");
     
-    // Enable IO for playback
-    status = AudioUnitSetProperty(audioUnit,
-                                  kAudioOutputUnitProperty_EnableIO,
-                                  kAudioUnitScope_Output,
-                                  kOutputBus,
-                                  &flag,
-                                  sizeof(flag));
-    checkStatus(status);
+    UInt32 outputEnabled = 1;
+    status = AudioUnitSetProperty(audioUnit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, ae_kOutputBus, &outputEnabled, sizeof(outputEnabled));
+    checkStatus(status, "AudioUnitSetProperty EnableIO Output");
     
-    // Describe format
-    AudioStreamBasicDescription audioFormat;
-    audioFormat.mSampleRate			= 44100.00;
-    audioFormat.mFormatID			= kAudioFormatLinearPCM;
-    audioFormat.mFormatFlags		= kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-    audioFormat.mFramesPerPacket	= 1;
-    audioFormat.mChannelsPerFrame	= 1;
-    audioFormat.mBitsPerChannel		= 16;
-    audioFormat.mBytesPerPacket		= 2;
-    audioFormat.mBytesPerFrame		= 2;
+    status = AudioUnitSetProperty(audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, ae_kInputBus, &ae_kAudioFormat, sizeof(ae_kAudioFormat));
+    checkStatus(status, "AudioUnitSetProperty StreamFormat Output");
+    status = AudioUnitSetProperty(audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, ae_kOutputBus, &ae_kAudioFormat, sizeof(ae_kAudioFormat));
+    checkStatus(status, "AudioUnitSetProperty StreamFromat Input");
     
-    stream = audioFormat;
-    self.format = [[AVAudioFormat alloc] initWithStreamDescription:&stream];
-    _audioFormat = _format;
-    
-    // Apply format
-    status = AudioUnitSetProperty(audioUnit,
-                                  kAudioUnitProperty_StreamFormat,
-                                  kAudioUnitScope_Output,
-                                  kInputBus,
-                                  &audioFormat,
-                                  sizeof(audioFormat));
-    checkStatus(status);
-    status = AudioUnitSetProperty(audioUnit,
-                                  kAudioUnitProperty_StreamFormat,
-                                  kAudioUnitScope_Input,
-                                  kOutputBus,
-                                  &audioFormat,
-                                  sizeof(audioFormat));
-    checkStatus(status);
-    
-    // Set input callback
     AURenderCallbackStruct callbackStruct;
     callbackStruct.inputProc = recordingCallback;
     callbackStruct.inputProcRefCon = (__bridge void *)(self);
-    status = AudioUnitSetProperty(audioUnit,
-                                  kAudioOutputUnitProperty_SetInputCallback,
-                                  kAudioUnitScope_Global,
-                                  kInputBus,
-                                  &callbackStruct,
-                                  sizeof(callbackStruct));
-    checkStatus(status);
+    status = AudioUnitSetProperty(audioUnit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, ae_kInputBus, &callbackStruct, sizeof(callbackStruct));
+    checkStatus(status, "AudioUnitSetProperty InputCallback Global");
     
-    // Set output callback
     callbackStruct.inputProc = playbackCallback;
     callbackStruct.inputProcRefCon = (__bridge void *)(self);
-    status = AudioUnitSetProperty(audioUnit,
-                                  kAudioUnitProperty_SetRenderCallback,
-                                  kAudioUnitScope_Global,
-                                  kOutputBus,
-                                  &callbackStruct,
-                                  sizeof(callbackStruct));
-    checkStatus(status);
+    status = AudioUnitSetProperty(audioUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Global, ae_kOutputBus, &callbackStruct, sizeof(callbackStruct));
+    checkStatus(status, "AudioUnitSetProperty OutputCallback Global");
     
     status = AudioUnitInitialize(audioUnit);
-    checkStatus(status);
-    
-    OSStatus status = AudioOutputUnitStart(audioUnit);
-    checkStatus(status);
+    checkStatus(status, "AudioUnitInitialize");
 }
 
-static OSStatus recordingCallback(void *inRefCon,
-                                  AudioUnitRenderActionFlags *ioActionFlags,
-                                  const AudioTimeStamp *inTimeStamp,
-                                  UInt32 inBusNumber,
-                                  UInt32 inNumberFrames,
-                                  AudioBufferList *ioData) {
+#pragma mark - Recording Start/Stop
+
+- (void)stopRecording
+{
+    status = AudioOutputUnitStart(audioUnit);
+    checkStatus(status, "AudioOutputUnitStart");
+}
+
+- (void)startRecording
+{
+    status = AudioOutputUnitStop(audioUnit);
+    checkStatus(status, "AudioOutputUnitStop");
+}
+
+#pragma mark - Recording Callback
+
+static OSStatus recordingCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData)
+{
+    AudioEngine *e = (__bridge AudioEngine *)inRefCon;
     
-    
-    NSLog(@"RECORDING!!!");
-    // TODO: Use inRefCon to access our interface object to do stuff
-    // Then, use inNumberFrames to figure out how much data is available, and make
-    // that much space available in buffers in an AudioBufferList.
-    
-    if (list == NULL) {
-        UInt32 size = inNumberFrames * stream.mBytesPerFrame; //(512 * 2)
-        list = Buffer_create(size);
+    if (e->list == NULL) {
+        UInt32 size = inNumberFrames * ae_kAudioFormat.mBytesPerFrame; //(512 * 2)
+        e->list = Buffer_create(size);
     }
     
-    AudioBufferList *bufferList = list; // <- Fill this up with buffers (you will want to malloc it, as it's a dynamic-length list)
+    AudioBufferList *bufferList = e->list;
     
-    // Then:
-    // Obtain recorded samples
+    e->status = AudioUnitRender(e->audioUnit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, bufferList);
+    checkStatus(e->status, "AudioUnitRender recordingCallback");
     
-    OSStatus status;
     
-    status = AudioUnitRender(audioUnit,
-                             ioActionFlags,
-                             inTimeStamp,
-                             inBusNumber,
-                             inNumberFrames,
-                             bufferList);
-    checkStatus(status);
-    
-    AudioEngine *e = (__bridge AudioEngine *)inRefCon;
-    SInt16 *inputFrames = (SInt16 *)(list->mBuffers->mData);
-    [e renderBuffer:inputFrames frameCount:inNumberFrames bytesPerFrame:stream.mBytesPerFrame];
-    // Now, we have the samples we just read sitting in buffers in bufferList
-    //DoStuffWithTheRecordedAudio(bufferList);
+    SInt16 *inputFrames = (SInt16 *)(e->list->mBuffers->mData);
+    [e renderBuffer:inputFrames frameCount:inNumberFrames bytesPerFrame:ae_kAudioFormat.mBytesPerFrame];
+
     return noErr;
 }
 
-static OSStatus playbackCallback(void *inRefCon,
-                                 AudioUnitRenderActionFlags *ioActionFlags,
-                                 const AudioTimeStamp *inTimeStamp,
-                                 UInt32 inBusNumber,
-                                 UInt32 inNumberFrames,
-                                 AudioBufferList *ioData) {
-    
-    NSLog(@"PLAYBACK!!!");
-    
-    // Notes: ioData contains buffers (may be more than one!)
-    // Fill them up as much as you can. Remember to set the size value in each buffer to match how
-    // much data is in the buffer.
+#pragma mark - Playback Callback
+
+static OSStatus playbackCallback(void *inRefCon, AudioUnitRenderActionFlags *ioActionFlags, const AudioTimeStamp *inTimeStamp, UInt32 inBusNumber, UInt32 inNumberFrames, AudioBufferList *ioData)
+{
     return noErr;
 }
+
+#pragma mark - Block handler
 
 - (void)renderBuffer:(SInt16 *)buffer frameCount:(UInt32)frameCount bytesPerFrame:(UInt32)bytesPerFrame
 {
-//    for (int i = 0; i < frameCount; i++) {
-//        NSLog(@"%hd", buffer[i]);
-//    }
-    
-    
-    
     if (self.block) {
-        NSData *d = [NSData dataWithBytes:buffer length:frameCount * bytesPerFrame];
-        NSLog(@"Rendered: %lu bytes.", (unsigned long)d.length);
-        self.block(d, _format, frameCount);
+        self.block([NSData dataWithBytes:buffer length:frameCount * bytesPerFrame], self->_audioFormat, frameCount);
     }
 }
+
+- (void)tapInput:(__nonnull AudioInputBlock)block
+{
+    self.block = block;
+}
+
+#pragma mark - Buffer Management
 
 AudioBufferList* Buffer_create(UInt32 bufferSize)
 {
@@ -224,11 +175,6 @@ void Buffer_destory(AudioBufferList* bufferList)
 {
     free(bufferList->mBuffers[0].mData);
     free(bufferList);
-}
-
-- (void)tapInput:(__nonnull AudioInputBlock)block
-{
-    self.block = block;
 }
 
 - (void)dealloc
