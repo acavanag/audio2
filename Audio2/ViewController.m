@@ -24,6 +24,9 @@
     [self.engine startPlaying];
     
     [self.engine tapInput:^(NSData *buffer) {
+        
+        NSLog(@"wat");
+        
         [self.engine playBuffer:buffer];
     }];
 }

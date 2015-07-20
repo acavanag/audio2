@@ -106,14 +106,14 @@ static inline BOOL _checkStatus(OSStatus result, const char *operation, const ch
 
 - (void)stopRecording
 {
-    status = AudioOutputUnitStart(audioUnit);
-    checkStatus(status, "AudioOutputUnitStart");
+    status = AudioOutputUnitStop(audioUnit);
+    checkStatus(status, "AudioOutputUnitStop");
 }
 
 - (void)startRecording
 {
-    status = AudioOutputUnitStop(audioUnit);
-    checkStatus(status, "AudioOutputUnitStop");
+    status = AudioOutputUnitStart(audioUnit);
+    checkStatus(status, "AudioOutputUnitStart");
 }
 
 #pragma mark - Recording Callback
